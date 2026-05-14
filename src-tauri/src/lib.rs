@@ -73,6 +73,8 @@ pub struct SystemSnapshot {
 async fn get_system_snapshot() -> Result<SystemSnapshot, String> {
     let mut sys = System::new_all();
     sys.refresh_all();
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    sys.refresh_all();
 
     let system = SystemInfo {
         hostname: System::host_name().unwrap_or_default(),
