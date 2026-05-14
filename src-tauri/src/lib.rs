@@ -71,10 +71,11 @@ pub struct SystemSnapshot {
 
 #[tauri::command]
 async fn get_system_snapshot() -> Result<SystemSnapshot, String> {
-    let mut sys = System::new_all();
-    sys.refresh_all();
-    std::thread::sleep(std::time::Duration::from_millis(200));
-    sys.refresh_all();
+    let snapshot = tauri::async_runtime::spawn_blocking(|| {
+        let mut sys = System::new_all();
+        sys.refresh_all();
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        sys.refresh_all();
 
     let system = SystemInfo {
         hostname: System::host_name().unwrap_or_default(),
@@ -136,24 +137,34 @@ async fn get_system_snapshot() -> Result<SystemSnapshot, String> {
     processes.sort_by(|a, b| b.cpu_usage.partial_cmp(&a.cpu_usage).unwrap_or(std::cmp::Ordering::Equal));
     processes.truncate(20);
 
-    Ok(SystemSnapshot {
-        system,
-        cpu,
-        memory,
-        disks,
-        networks,
-        top_processes: processes,
-    })
+        Ok(SystemSnapshot {
+            system,
+            cpu,
+            memory,
+            disks,
+            networks,
+            top_processes: processes,
+        })
+    }).await.map_err(|e| format!("snapshot task failed: {}", e))?;
+
+    snapshot
 }
 
 #[tauri::command]
 async fn kill_process(pid: u32) -> Result<bool, String> {
-    let pid = Pid::from_u32(pid);
-    if let Some(process) = System::new_all().process(pid) {
-        Ok(process.kill())
-    } else {
-        Err(format!("Process {} not found", pid))
+    if pid == 0 {
+        return Err("Invalid PID: must be a positive integer".to_string());
     }
+    let pid_obj = Pid::from_u32(pid);
+    let sys = System::new_all();
+    let process = match sys.process(pid_obj) {
+        Some(p) => p,
+        None => return Err(format!("Process {} not found", pid)),
+    };
+    if process.pid().as_u32() == 1 {
+        return Err("Refusing to kill PID 1 (init)".to_string());
+    }
+    Ok(process.kill())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
